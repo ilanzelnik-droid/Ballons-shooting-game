@@ -303,6 +303,21 @@
   }
 
   function handleHit(color, px, py) {
+    // Wildcard: colorful counts as the current target, never triggers a miss
+    if (color === 'colorful') {
+      addPopup(px, py - 20, 'WILD! 🌈', '#ff8833');
+      if (targetColor !== null) {
+        streak++;
+        if (streak >= 3) {
+          score++;
+          addPopup(px, py - 20, '+1 POINT!', '#ffff44');
+          targetColor = null;
+          streak = 0;
+        }
+      }
+      return;
+    }
+
     if (targetColor === null) {
       // Free-choice: the first balloon hit after a score sets the new target
       targetColor = color;
