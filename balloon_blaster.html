@@ -437,39 +437,17 @@
     ctx.fillStyle = lives <= 1 ? '#cc0000' : '#003366';
     ctx.fillText(heartsStr, 16, 62);
 
-    // Target panel (left column, below lives)
-    const panW = 150, panH = 80, panX = 6, panY = 74;
-    const panCX = panX + panW / 2;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    rrect(panX, panY, panW, panH, 10);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 13px Arial';
-    ctx.fillStyle = '#ccd';
-    ctx.fillText(targetColor ? 'HIT 3 IN A ROW' : 'YOUR CHOICE!', panCX, panY + 16);
-
-    // Target balloon thumbnail (or "?" when player picks next color)
-    if (targetColor) {
-      drawSprite(targetColor, panCX - 18, panY + 18, 36, 52);
-    } else {
-      ctx.font = 'bold 40px Arial';
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText('?', panCX, panY + 62);
-    }
-
-    // Streak dots
+    // Streak dots (left column, below lives) — filled with the streak's color
+    const DOT_FILL   = { green:'#44dd44', yellow:'#ffee00', purple:'#cc44ff', colorful:'#ff8800' };
+    const DOT_STROKE = { green:'#aaffaa', yellow:'#ffe080', purple:'#ee88ff', colorful:'#ffcc88' };
     for (let i = 0; i < 3; i++) {
-      const dx = panCX - 28 + i * 28;
-      const dy = panY + panH + 10;
+      const dx = 16 + i * 28;
+      const dy = 84;
       ctx.beginPath();
       ctx.arc(dx, dy, 9, 0, Math.PI*2);
-      ctx.fillStyle = i < streak ? '#44ff44' : 'rgba(255,255,255,0.2)';
+      ctx.fillStyle   = (i < streak && targetColor) ? DOT_FILL[targetColor]   : 'rgba(255,255,255,0.2)';
       ctx.fill();
-      ctx.strokeStyle = i < streak ? '#aaffaa' : 'rgba(255,255,255,0.4)';
+      ctx.strokeStyle = (i < streak && targetColor) ? DOT_STROKE[targetColor] : 'rgba(255,255,255,0.4)';
       ctx.lineWidth = 2;
       ctx.stroke();
     }
