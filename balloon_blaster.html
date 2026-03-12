@@ -29,7 +29,7 @@
 </head>
 <body>
   <canvas id="gameCanvas" width="800" height="600"></canvas>
-  <div id="instructions">Arrow Keys: Move &nbsp;|&nbsp; Space: Shoot &nbsp;|&nbsp; R: Restart</div>
+  <div id="instructions">Arrow Keys: Move &nbsp;|&nbsp; Space: Shoot &nbsp;|&nbsp; R: Restart &nbsp;|&nbsp; Esc: Quit</div>
 
   <script>
   const canvas = document.getElementById('gameCanvas');
@@ -78,7 +78,8 @@
   }
 
   // ── Load Images ───────────────────────────────────────────────────────────
-  const IMG = {};
+  const IMG       = {};   // key → canvas
+  const IMG_BLEND = {};   // key → true if needs 'multiply' composite
   const FILES = {
     green:    'Green Baloon.jpg',
     yellow:   'Yellow Baloon.jpg',
@@ -88,6 +89,27 @@
   };
   const BALLOON_TYPES = ['green','yellow','purple','colorful'];
 
+  // Draw a sprite, using multiply blend if getImageData was blocked
+  function drawSprite(key, x, y, w, h) {
+    if (!IMG[key]) return;
+    if (IMG_BLEND[key]) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.drawImage(IMG[key], x, y, w, h);
+      ctx.restore();
+    } else {
+      ctx.drawImage(IMG[key], x, y, w, h);
+    }
+  }
+
+  function rawCanvas(img) {
+    const fb = document.createElement('canvas');
+    fb.width  = img.naturalWidth  || img.width  || 70;
+    fb.height = img.naturalHeight || img.height || 100;
+    fb.getContext('2d').drawImage(img, 0, 0);
+    return fb;
+  }
+
   function loadImages() {
     return new Promise(resolve => {
       let done = 0;
@@ -95,11 +117,18 @@
       for (const [key, src] of Object.entries(FILES)) {
         const img = new Image();
         img.onload = () => {
-          IMG[key] = removeBackground(img);
+          try {
+            IMG[key]       = removeBackground(img);
+            IMG_BLEND[key] = false;
+          } catch (e) {
+            // getImageData blocked (file:// security) — use raw image + multiply blend
+            IMG[key]       = rawCanvas(img);
+            IMG_BLEND[key] = true;
+          }
           if (++done === total) resolve();
         };
         img.onerror = () => {
-          // Fallback colored ellipse if image missing
+          // Image not found — draw a coloured shape placeholder
           const fb = document.createElement('canvas');
           fb.width = 70; fb.height = 100;
           const fc = fb.getContext('2d');
@@ -107,7 +136,8 @@
           fc.beginPath();
           fc.ellipse(35, 50, 30, 45, 0, 0, Math.PI * 2);
           fc.fill();
-          IMG[key] = fb;
+          IMG[key]       = fb;
+          IMG_BLEND[key] = false;
           if (++done === total) resolve();
         };
         img.src = src;
@@ -154,6 +184,10 @@
       e.preventDefault();
     keys.add(e.key);
     if ((e.key === 'r' || e.key === 'R') && gameOver) initGame();
+    if (e.key === 'Escape') {
+      if (!gameOver) { gameOver = true; }   // end current game
+      else           { window.close(); }    // close window from game-over screen
+    }
   });
   window.addEventListener('keyup', e => keys.delete(e.key));
 
@@ -307,19 +341,19 @@
 
   // ── Draw ──────────────────────────────────────────────────────────────────
   function draw() {
-    // Sky
+    // Sky (bright daytime — needed for 'multiply' white-removal trick)
     const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    sky.addColorStop(0,   '#08102e');
-    sky.addColorStop(0.45,'#1b5080');
-    sky.addColorStop(1,   '#89c9e8');
+    sky.addColorStop(0,   '#5ba3d9');
+    sky.addColorStop(0.5, '#a8d8f0');
+    sky.addColorStop(1,   '#dff0fb');
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Stars
+    // Clouds (replace stars — bright sky now)
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
     for (const s of stars) {
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
-      ctx.fillStyle = `rgba(255,255,255,${s.a})`;
+      ctx.ellipse(s.x, s.y * 2.5, s.r * 10, s.r * 4, 0, 0, Math.PI*2);
       ctx.fill();
     }
 
@@ -341,7 +375,7 @@
 
     // Balloons
     for (const b of balloons) {
-      if (IMG[b.color]) ctx.drawImage(IMG[b.color], b.x, b.y, b.w, b.h);
+      drawSprite(b.color, b.x, b.y, b.w, b.h);
     }
 
     // Bullets (laser)
@@ -358,7 +392,7 @@
     ctx.shadowBlur = 0;
 
     // Ship
-    if (IMG.ship) ctx.drawImage(IMG.ship, ship.x, ship.y, ship.w, ship.h);
+    drawSprite('ship', ship.x, ship.y, ship.w, ship.h);
 
     // Floating text popups
     for (const p of popups) {
@@ -382,10 +416,10 @@
     // Score (top-left)
     ctx.textAlign = 'left';
     ctx.font = 'bold 24px Arial';
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
     ctx.strokeText(`Score: ${score}`, 16, 34);
+    ctx.fillStyle = '#003366';
     ctx.fillText(`Score: ${score}`, 16, 34);
 
     // Lives (top-left below score)
@@ -394,8 +428,10 @@
     const heartEmpty = '♡';
     let heartsStr = '';
     for (let i = 0; i < TOTAL_LIVES; i++) heartsStr += (i < lives ? heartFull : heartEmpty) + ' ';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
     ctx.strokeText(heartsStr, 16, 62);
-    ctx.fillStyle = lives <= 1 ? '#ff4444' : '#ff8888';
+    ctx.fillStyle = lives <= 1 ? '#cc0000' : '#003366';
     ctx.fillText(heartsStr, 16, 62);
 
     // Target panel (top-center)
@@ -413,9 +449,7 @@
     ctx.fillText('HIT 3 IN A ROW', canvas.width/2, panY + 16);
 
     // Target balloon thumbnail
-    if (IMG[targetColor]) {
-      ctx.drawImage(IMG[targetColor], canvas.width/2 - 18, panY + 18, 36, 52);
-    }
+    drawSprite(targetColor, canvas.width/2 - 18, panY + 18, 36, 52);
 
     // Streak dots
     for (let i = 0; i < 3; i++) {
@@ -460,7 +494,7 @@
 
     ctx.font = '20px Arial';
     ctx.fillStyle = '#aaaaaa';
-    ctx.fillText('Press  R  to play again', canvas.width/2, canvas.height/2 + 80);
+    ctx.fillText('R — play again    |    Esc — quit', canvas.width/2, canvas.height/2 + 80);
   }
 
   // ── Game Loop ─────────────────────────────────────────────────────────────
