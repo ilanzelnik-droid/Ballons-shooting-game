@@ -147,7 +147,7 @@
 
   // ── Game State ────────────────────────────────────────────────────────────
   const TOTAL_LIVES = 3;
-  let score, lives, streak, targetColor, gameOver;
+  let score, lives, streak, targetColor, gameOver, level;
   let balloonTimer, shootCooldown;
 
   const ship = { x:0, y:0, w:90, h:70, speed:5 };
@@ -163,6 +163,7 @@
     streak       = 0;
     targetColor  = null;   // first hit after init/score picks the color
     gameOver     = false;
+    level        = 1;
     balloonTimer = 0;
     shootCooldown = 0;
     ship.x = canvas.width  / 2 - ship.w / 2;
@@ -246,7 +247,7 @@
         y: -BH - 10,
         w: BW, h: BH,
         color: randomColor(),
-        speed: 1.0 + Math.random() * 1.8
+        speed: (1.0 + Math.random() * 1.8) * (1 + (level - 1) * 0.12)
       });
     }
 
@@ -310,6 +311,7 @@
         streak++;
         if (streak >= 3) {
           score++;
+          checkLevelUp();
           addPopup(px, py - 20, '+1 POINT!', '#ffff44');
           targetColor = null;
           streak = 0;
@@ -326,6 +328,7 @@
       streak++;
       if (streak >= 3) {
         score++;
+        checkLevelUp();
         addPopup(px, py - 20, '+1 POINT!', '#ffff44');
         targetColor = null;   // player's next hit will choose the new color
         streak = 0;
@@ -337,6 +340,14 @@
       addPopup(px, py - 20, 'MISS! -1 ❤', '#ff4444');
       // Screen flash handled via a flag
       missFlash = 10;
+    }
+  }
+
+  function checkLevelUp() {
+    const newLevel = Math.floor(score / 3) + 1;
+    if (newLevel > level) {
+      level = newLevel;
+      addPopup(canvas.width / 2, canvas.height / 2, `LEVEL ${level}!`, '#00eeff');
     }
   }
 
@@ -440,7 +451,15 @@
     ctx.fillStyle = '#003366';
     ctx.fillText(`Score: ${score}`, 16, 34);
 
-    // Lives (top-left below score)
+    // Level (top-left below score)
+    ctx.font = 'bold 18px Arial';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
+    ctx.strokeText(`Level: ${level}`, 16, 56);
+    ctx.fillStyle = '#00eeff';
+    ctx.fillText(`Level: ${level}`, 16, 56);
+
+    // Lives (top-left below level)
     ctx.font = 'bold 20px Arial';
     const heartFull  = '❤';
     const heartEmpty = '♡';
@@ -448,16 +467,16 @@
     for (let i = 0; i < TOTAL_LIVES; i++) heartsStr += (i < lives ? heartFull : heartEmpty) + ' ';
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 4;
-    ctx.strokeText(heartsStr, 16, 62);
+    ctx.strokeText(heartsStr, 16, 80);
     ctx.fillStyle = lives <= 1 ? '#cc0000' : '#003366';
-    ctx.fillText(heartsStr, 16, 62);
+    ctx.fillText(heartsStr, 16, 80);
 
     // Streak dots (left column, below lives) — filled with the streak's color
     const DOT_FILL   = { green:'#44dd44', yellow:'#ffee00', purple:'#cc44ff', colorful:'#ff8800' };
     const DOT_STROKE = { green:'#aaffaa', yellow:'#ffe080', purple:'#ee88ff', colorful:'#ffcc88' };
     for (let i = 0; i < 3; i++) {
       const dx = 16 + i * 28;
-      const dy = 84;
+      const dy = 102;
       ctx.beginPath();
       ctx.arc(dx, dy, 9, 0, Math.PI*2);
       ctx.fillStyle   = (i < streak && targetColor) ? DOT_FILL[targetColor]   : 'rgba(255,255,255,0.2)';
