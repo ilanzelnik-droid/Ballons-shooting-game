@@ -147,7 +147,7 @@
 
   // ── Game State ────────────────────────────────────────────────────────────
   const TOTAL_LIVES = 3;
-  let score, lives, streak, targetColor, gameOver, level;
+  let score, lives, streak, targetColor, gameOver, level, gameStartTime, gameDuration;
   let balloonTimer, shootCooldown;
 
   const ship = { x:0, y:0, w:90, h:70, speed:5 };
@@ -162,8 +162,9 @@
     lives        = TOTAL_LIVES;
     streak       = 0;
     targetColor  = null;   // first hit after init/score picks the color
-    gameOver     = false;
-    level        = 1;
+    gameOver      = false;
+    level         = 1;
+    gameStartTime = Date.now();
     balloonTimer = 0;
     shootCooldown = 0;
     ship.x = canvas.width  / 2 - ship.w / 2;
@@ -239,17 +240,21 @@
       if (bullets[i].y < -30) bullets.splice(i, 1);
     }
 
-    // Spawn balloons
+    // Spawn balloons — target count grows by 2 every 6 points
     if (++balloonTimer >= SPAWN_FRAMES) {
       balloonTimer = 0;
-      balloons.push({
-        x: 20 + Math.random() * (canvas.width - BW - 40),
-        y: -BH - 10,
-        w: BW, h: BH,
-        color: randomColor(),
-        speed: (1.0 + Math.random() * 1.8) * (1 + (level - 1) * 0.12),
-        vx: (Math.random() * 3 + 1) * (Math.random() < 0.5 ? 1 : -1)
-      });
+      const target   = 1 + Math.floor(score / 6) * 2;
+      const toSpawn  = Math.max(1, target - balloons.length);
+      for (let s = 0; s < toSpawn; s++) {
+        balloons.push({
+          x: 20 + Math.random() * (canvas.width - BW - 40),
+          y: -BH - 10,
+          w: BW, h: BH,
+          color: randomColor(),
+          speed: (1.0 + Math.random() * 1.8) * (1 + (level - 1) * 0.12),
+          vx: (Math.random() * 3 + 1) * (Math.random() < 0.5 ? 1 : -1)
+        });
+      }
     }
 
     // Move balloons
@@ -320,7 +325,11 @@
       if (popups[i].life <= 0) popups.splice(i, 1);
     }
 
-    if (lives <= 0) gameOver = true;
+    if (lives <= 0 && !gameOver) {
+      gameOver     = true;
+      gameDuration = Math.floor((Date.now() - gameStartTime) / 1000);
+      saveScore(score, gameDuration);
+    }
   }
 
   function handleHit(color, px, py) {
@@ -507,6 +516,23 @@
     }
   }
 
+  // ── High-score persistence ────────────────────────────────────────────────
+  function loadScores() {
+    try { return JSON.parse(localStorage.getItem('bb_scores') || '[]'); }
+    catch { return []; }
+  }
+  function saveScore(s, secs) {
+    const scores = loadScores();
+    const now = new Date();
+    const date = now.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+    scores.push({ score: s, secs, date });
+    scores.sort((a, b) => b.score - a.score);
+    localStorage.setItem('bb_scores', JSON.stringify(scores.slice(0, 3)));
+  }
+  function fmtTime(secs) {
+    return Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+  }
+
   function rrect(x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x+r, y);
@@ -518,25 +544,59 @@
   }
 
   function drawGameOver() {
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    const cx = canvas.width / 2;
+
+    // Title
     ctx.textAlign = 'center';
     ctx.font = 'bold 60px Arial';
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 4;
-    ctx.strokeText('GAME OVER', canvas.width/2, canvas.height/2 - 30);
+    ctx.strokeText('GAME OVER', cx, 80);
     ctx.fillStyle = '#ff4444';
-    ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2 - 30);
+    ctx.fillText('GAME OVER', cx, 80);
 
-    ctx.font = 'bold 30px Arial';
+    // Current score + time (frozen at game-over)
+    ctx.font = 'bold 28px Arial';
     ctx.fillStyle = '#ffffff';
-    ctx.strokeText(`Score: ${score}`, canvas.width/2, canvas.height/2 + 30);
-    ctx.fillText(`Score: ${score}`, canvas.width/2, canvas.height/2 + 30);
+    ctx.strokeText(`Score: ${score}   ${fmtTime(gameDuration)}`, cx, 130);
+    ctx.fillText(`Score: ${score}   ${fmtTime(gameDuration)}`, cx, 130);
 
-    ctx.font = '20px Arial';
+    // Leaderboard panel
+    const scores = loadScores();
+    const panW = 440, panH = 26 + scores.length * 28 + 16;
+    const panX = cx - panW / 2, panY = 152;
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    rrect(panX, panY, panW, panH, 10);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.font = 'bold 14px Arial';
+    ctx.fillStyle = '#ffdd44';
+    ctx.fillText('ALL-TIME TOP SCORES', cx, panY + 18);
+
+    scores.forEach((entry, i) => {
+      const y = panY + 40 + i * 28;
+      const isThis = entry.score === score && i === scores.findIndex(e => e.score === score);
+      const col = isThis ? '#ffff88' : (i === 0 ? '#ffd700' : '#cccccc');
+      ctx.font = isThis ? 'bold 15px Arial' : '14px Arial';
+      ctx.fillStyle = col;
+      ctx.textAlign = 'left';  ctx.fillText(`${i + 1}.`,                  panX + 14, y);
+      ctx.textAlign = 'left';  ctx.fillText(entry.score,                   panX + 48, y);
+      ctx.textAlign = 'center';ctx.fillText(fmtTime(entry.secs ?? 0),      cx,        y);
+      ctx.textAlign = 'right'; ctx.fillStyle = isThis ? '#ffff88' : '#777';
+      ctx.font = '12px Arial'; ctx.fillText(entry.date,                    panX + panW - 12, y);
+    });
+
+    // Footer
+    ctx.textAlign = 'center';
+    ctx.font = '18px Arial';
     ctx.fillStyle = '#aaaaaa';
-    ctx.fillText('R — play again    |    Esc — quit', canvas.width/2, canvas.height/2 + 80);
+    ctx.fillText('R — play again    |    Esc — quit', cx, panY + panH + 30);
   }
 
   // ── Game Loop ─────────────────────────────────────────────────────────────
