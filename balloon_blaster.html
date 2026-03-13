@@ -86,6 +86,7 @@
     purple:   'Purple Baloon.jpg',
     colorful: 'Color Baloon.jpg',
     ship:     'Spaceship.jpg',
+    iranship: 'iranian spaceship.png',
   };
   const BALLOON_TYPES = ['green','yellow','purple','colorful'];
 
@@ -148,7 +149,9 @@
   // ── Game State ────────────────────────────────────────────────────────────
   const TOTAL_LIVES = 3;
   let score, lives, streak, targetColor, gameOver, level, gameStartTime, gameDuration;
-  let balloonTimer, shootCooldown;
+  let balloonTimer, shootCooldown, bonusShipTimer, bonusShip;
+  const BONUS_INTERVAL = 300;   // ~5 s at 60 fps
+  const BSW = 120, BSH = 65;    // bonus ship render size
 
   const ship = { x:0, y:0, w:90, h:70, speed:5 };
 
@@ -165,8 +168,10 @@
     gameOver      = false;
     level         = 1;
     gameStartTime = Date.now();
-    balloonTimer = 0;
-    shootCooldown = 0;
+    balloonTimer   = 0;
+    shootCooldown  = 0;
+    bonusShipTimer = 0;
+    bonusShip      = null;
     ship.x = canvas.width  / 2 - ship.w / 2;
     ship.y = canvas.height - ship.h - 20;
     bullets.length   = 0;
@@ -280,6 +285,31 @@
           const push = overlapX / 2 + 0.5;
           if (cx >= 0) { a.x += push; b.x -= push; a.vx += 0.6; b.vx -= 0.6; }
           else         { a.x -= push; b.x += push; a.vx -= 0.6; b.vx += 0.6; }
+        }
+      }
+    }
+
+    // Bonus ship — flies right-to-left every 5 s
+    if (++bonusShipTimer >= BONUS_INTERVAL) {
+      bonusShipTimer = 0;
+      if (!bonusShip) bonusShip = { x: canvas.width + 10, y: 0, w: BSW, h: BSH, speed: 3.5 };
+    }
+    if (bonusShip) {
+      bonusShip.x -= bonusShip.speed;
+      if (bonusShip.x + bonusShip.w < 0) bonusShip = null;
+    }
+
+    // Bullet ↔ Bonus ship
+    if (bonusShip) {
+      for (let bi = bullets.length - 1; bi >= 0; bi--) {
+        if (overlaps(bullets[bi], bonusShip)) {
+          score += 3;
+          checkLevelUp();
+          burst(bonusShip.x + bonusShip.w / 2, bonusShip.y + bonusShip.h / 2, 'yellow');
+          addPopup(bonusShip.x + bonusShip.w / 2, bonusShip.y - 10, '+3 BONUS!', '#ff6600');
+          bonusShip = null;
+          bullets.splice(bi, 1);
+          break;
         }
       }
     }
@@ -435,6 +465,9 @@
     for (const b of balloons) {
       drawSprite(b.color, b.x, b.y, b.w, b.h);
     }
+
+    // Bonus ship
+    if (bonusShip) drawSprite('iranship', bonusShip.x, bonusShip.y, bonusShip.w, bonusShip.h);
 
     // Bullets (laser)
     for (const b of bullets) {
