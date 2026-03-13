@@ -29,7 +29,7 @@
 </head>
 <body>
   <canvas id="gameCanvas" width="800" height="600"></canvas>
-  <div id="instructions">Arrow Keys: Move &nbsp;|&nbsp; Space: Shoot &nbsp;|&nbsp; R: Restart &nbsp;|&nbsp; Esc: Quit</div>
+  <div id="instructions">Arrow Keys: Move &nbsp;|&nbsp; Space: Shoot &nbsp;|&nbsp; Enter: Shield &nbsp;|&nbsp; R: Restart &nbsp;|&nbsp; Esc: Quit</div>
 
   <script>
   const canvas = document.getElementById('gameCanvas');
@@ -146,6 +146,55 @@
     });
   }
 
+  // ── Audio (Web Audio synthesis — no external files) ──────────────────────
+  let _ac = null;
+  function ac() {
+    if (!_ac) _ac = new (window.AudioContext || window.webkitAudioContext)();
+    if (_ac.state === 'suspended') _ac.resume();
+    return _ac;
+  }
+  function tone(freq, type, dur, vol = 0.28, startFreq = null) {
+    const ctx = ac(), o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = type;
+    o.frequency.setValueAtTime(startFreq || freq, ctx.currentTime);
+    if (startFreq) o.frequency.exponentialRampToValueAtTime(freq, ctx.currentTime + dur);
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    o.start(); o.stop(ctx.currentTime + dur);
+  }
+  function noise(dur, vol = 0.6, filterFreq = 300) {
+    const ctx = ac(), sr = ctx.sampleRate;
+    const buf = ctx.createBuffer(1, sr * dur, sr), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/d.length, 0.4);
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    f.type = 'lowpass'; f.frequency.value = filterFreq;
+    src.buffer = buf; src.connect(f); f.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    src.start();
+  }
+  function arpeggio(freqs, type, noteDur, vol = 0.22) {
+    freqs.forEach((f, i) => {
+      const ctx = ac(), o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      const t = ctx.currentTime + i * noteDur;
+      o.type = type; o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + noteDur * 1.5);
+      o.start(t); o.stop(t + noteDur * 1.5);
+    });
+  }
+  const SFX = {
+    shoot:    () => tone(880, 'sine',     0.08, 0.18, 1400),
+    pop:      () => { noise(0.12, 0.5, 500); tone(180, 'sine', 0.12, 0.15, 280); },
+    miss:     () => tone(200, 'sawtooth', 0.32, 0.22, 330),
+    score:    () => arpeggio([523, 659, 784],       'sine',     0.09),
+    wild:     () => arpeggio([440, 554, 659, 880],  'sine',     0.07, 0.18),
+    levelUp:  () => arpeggio([262, 330, 392, 523, 784], 'triangle', 0.11, 0.28),
+    bonus:    () => { noise(0.35, 0.9, 250); tone(60, 'sawtooth', 0.4, 0.35, 90); },
+    gameOver: () => arpeggio([330, 262, 196, 147], 'sine', 0.28, 0.35),
+  };
+
   // ── Game State ────────────────────────────────────────────────────────────
   const TOTAL_LIVES = 3;
   let score, lives, streak, targetColor, gameOver, level, gameStartTime, gameDuration;
@@ -172,6 +221,7 @@
     shootCooldown  = 0;
     bonusShipTimer = 0;
     bonusShip      = null;
+    missFlash = 0; scoreFlash = 0; levelFlash = 0;
     ship.x = canvas.width  / 2 - ship.w / 2;
     ship.y = canvas.height - ship.h - 20;
     bullets.length   = 0;
@@ -187,7 +237,7 @@
   // ── Input ─────────────────────────────────────────────────────────────────
   const keys = new Set();
   window.addEventListener('keydown', e => {
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Enter'].includes(e.key))
       e.preventDefault();
     keys.add(e.key);
     if ((e.key === 'r' || e.key === 'R') && gameOver) initGame();
@@ -237,6 +287,7 @@
     if (keys.has(' ') && shootCooldown === 0) {
       bullets.push({ x: ship.x + ship.w/2 - 4, y: ship.y - 8, w:8, h:22 });
       shootCooldown = 10;
+      SFX.shoot();
     }
 
     // Move bullets
@@ -305,8 +356,10 @@
         if (overlaps(bullets[bi], bonusShip)) {
           score += 3;
           checkLevelUp();
-          burst(bonusShip.x + bonusShip.w / 2, bonusShip.y + bonusShip.h / 2, 'yellow');
+          burstBig(bonusShip.x + bonusShip.w / 2, bonusShip.y + bonusShip.h / 2);
           addPopup(bonusShip.x + bonusShip.w / 2, bonusShip.y - 10, '+3 BONUS!', '#ff6600');
+          scoreFlash = 8;
+          SFX.bonus();
           bonusShip = null;
           bullets.splice(bi, 1);
           break;
@@ -329,14 +382,16 @@
       }
     }
 
-    // Ship ↔ Balloon (slightly inset hitbox)
-    const sh = { x: ship.x+12, y: ship.y+12, w: ship.w-24, h: ship.h-24 };
-    for (let ai = balloons.length-1; ai >= 0; ai--) {
-      if (overlaps(sh, balloons[ai])) {
-        const b = balloons[ai];
-        burst(b.x + b.w/2, b.y + b.h/2, b.color);
-        handleHit(b.color, b.x + b.w/2, b.y + b.h/2);
-        balloons.splice(ai, 1);
+    // Ship ↔ Balloon (slightly inset hitbox) — skipped while shield (Enter) is held
+    if (!keys.has('Enter')) {
+      const sh = { x: ship.x+12, y: ship.y+12, w: ship.w-24, h: ship.h-24 };
+      for (let ai = balloons.length-1; ai >= 0; ai--) {
+        if (overlaps(sh, balloons[ai])) {
+          const b = balloons[ai];
+          burst(b.x + b.w/2, b.y + b.h/2, b.color);
+          handleHit(b.color, b.x + b.w/2, b.y + b.h/2);
+          balloons.splice(ai, 1);
+        }
       }
     }
 
@@ -359,6 +414,7 @@
       gameOver     = true;
       gameDuration = Math.floor((Date.now() - gameStartTime) / 1000);
       saveScore(score, gameDuration);
+      SFX.gameOver();
     }
   }
 
@@ -366,12 +422,15 @@
     // Wildcard: colorful counts as the current target, never triggers a miss
     if (color === 'colorful') {
       addPopup(px, py - 20, 'WILD! 🌈', '#ff8833');
+      burstRainbow(px, py);
+      SFX.wild();
       if (targetColor !== null) {
         streak++;
         if (streak >= 3) {
           score++;
           checkLevelUp();
           addPopup(px, py - 20, '+1 POINT!', '#ffff44');
+          scoreFlash = 8;
           targetColor = null;
           streak = 0;
         }
@@ -380,33 +439,38 @@
     }
 
     if (targetColor === null) {
-      // Free-choice: the first balloon hit after a score sets the new target
       targetColor = color;
       streak = 1;
+      SFX.pop();
     } else if (color === targetColor) {
       streak++;
+      SFX.pop();
       if (streak >= 3) {
         score++;
         checkLevelUp();
         addPopup(px, py - 20, '+1 POINT!', '#ffff44');
-        targetColor = null;   // player's next hit will choose the new color
+        scoreFlash = 8;
+        targetColor = null;
         streak = 0;
+        SFX.score();
       }
     } else {
       lives = Math.max(0, lives - 1);
-      targetColor = color;   // wrong color becomes the new target
-      streak = 1;            // counts as first hit of the new streak
+      targetColor = color;
+      streak = 1;
       addPopup(px, py - 20, 'MISS! -1 ❤', '#ff4444');
-      // Screen flash handled via a flag
       missFlash = 10;
+      SFX.miss();
     }
   }
 
   function checkLevelUp() {
-    const newLevel = Math.floor(score / 3) + 1;
+    const newLevel = Math.floor(score / 6) + 1;
     if (newLevel > level) {
       level = newLevel;
       addPopup(canvas.width / 2, canvas.height / 2, `LEVEL ${level}!`, '#00eeff');
+      levelFlash = 14;
+      SFX.levelUp();
     }
   }
 
@@ -425,7 +489,24 @@
     });
   }
 
-  let missFlash = 0;
+  let missFlash = 0, scoreFlash = 0, levelFlash = 0;
+
+  function burstBig(x, y) {
+    for (let i = 0; i < 28; i++) {
+      const a = (Math.PI * 2 * i) / 28, s = 3 + Math.random() * 6;
+      const cols = ['#ff6600','#ffcc00','#ff3300','#ffff00','#ff9900'];
+      particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s,
+                        life: 1.2, color: cols[i % cols.length], size: 6 + Math.random() * 6 });
+    }
+  }
+  function burstRainbow(x, y) {
+    const cols = ['#ff4444','#ff8800','#ffee00','#44ff44','#44aaff','#cc44ff','#ff44cc'];
+    for (let i = 0; i < 21; i++) {
+      const a = (Math.PI * 2 * i) / 21, s = 2.5 + Math.random() * 4;
+      particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s,
+                        life: 1.1, color: cols[i % cols.length], size: 5 + Math.random() * 4 });
+    }
+  }
 
   // ── Draw ──────────────────────────────────────────────────────────────────
   function draw() {
@@ -445,12 +526,10 @@
       ctx.fill();
     }
 
-    // Red miss flash overlay
-    if (missFlash > 0) {
-      ctx.fillStyle = `rgba(255,0,0,${missFlash * 0.03})`;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      missFlash--;
-    }
+    // Screen flash overlays
+    if (missFlash  > 0) { ctx.fillStyle = `rgba(255,0,0,${missFlash  * 0.03})`; ctx.fillRect(0,0,canvas.width,canvas.height); missFlash--;  }
+    if (scoreFlash > 0) { ctx.fillStyle = `rgba(0,255,80,${scoreFlash * 0.04})`; ctx.fillRect(0,0,canvas.width,canvas.height); scoreFlash--; }
+    if (levelFlash > 0) { ctx.fillStyle = `rgba(0,220,255,${levelFlash * 0.05})`; ctx.fillRect(0,0,canvas.width,canvas.height); levelFlash--; }
 
     // Particles (behind balloons)
     for (const p of particles) {
@@ -481,6 +560,23 @@
       ctx.fillRect(b.x, b.y, b.w, b.h);
     }
     ctx.shadowBlur = 0;
+
+    // Shield bubble (drawn behind ship so ship renders on top)
+    if (keys.has('Enter') && !gameOver) {
+      const pulse = 0.55 + 0.25 * Math.sin(Date.now() / 120);
+      ctx.save();
+      ctx.shadowColor = '#00eeff';
+      ctx.shadowBlur  = 28;
+      ctx.strokeStyle = `rgba(0,220,255,${pulse})`;
+      ctx.lineWidth   = 4;
+      ctx.beginPath();
+      ctx.ellipse(ship.x + ship.w/2, ship.y + ship.h/2,
+                  ship.w/2 + 14, ship.h/2 + 14, 0, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(0,180,255,${pulse * 0.18})`;
+      ctx.fill();
+      ctx.restore();
+    }
 
     // Ship
     drawSprite('ship', ship.x, ship.y, ship.w, ship.h);
