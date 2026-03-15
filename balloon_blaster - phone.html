@@ -140,6 +140,80 @@
       -webkit-tap-highlight-color: transparent;
     }
     #name-btn:active { background: #003399; }
+
+    /* ── Tutorial overlay ── */
+    #tutorial-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,20,0.95);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      z-index: 20;
+      font-family: Arial, sans-serif;
+      overflow-y: auto;
+      padding: 16px 0 24px;
+      -webkit-overflow-scrolling: touch;
+    }
+    #tutorial-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      max-width: 480px;
+      width: 94%;
+    }
+    #tutorial-box h1 {
+      font-size: 30px;
+      color: #ff4444;
+      text-shadow: 0 0 20px #ff2200;
+      letter-spacing: 2px;
+      margin: 0;
+    }
+    .tut-section {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 12px 16px;
+    }
+    .tut-section h2 {
+      font-size: 12px;
+      letter-spacing: 2px;
+      color: #ffdd44;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .tut-section p, .tut-section li {
+      color: #ccc;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .tut-section ul { padding-left: 16px; }
+    .tut-ctrl-row { display: flex; align-items: center; gap: 10px; color: #ccc; font-size: 13px; margin-bottom: 6px; }
+    .ctrl-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 54px; padding: 4px 10px;
+      background: #111830; border: 1.5px solid #446;
+      border-radius: 6px; color: #88aaff; font: bold 12px Arial;
+      white-space: nowrap;
+    }
+    .tut-bonus { display: flex; flex-direction: column; gap: 8px; }
+    .tut-bonus-item { display: flex; align-items: center; gap: 10px; color: #ccc; font-size: 13px; }
+    .bonus-icon { font-size: 20px; }
+    #tutorial-start {
+      font: bold 20px Arial;
+      padding: 14px 52px;
+      border-radius: 10px;
+      background: #003300;
+      border: 2px solid #00aa44;
+      color: #44ff88;
+      cursor: pointer;
+      letter-spacing: 2px;
+      margin-top: 4px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #tutorial-start:active { background: #004400; }
   </style>
 </head>
 <body>
@@ -164,6 +238,44 @@
         <div id="name-subtitle">Enter your name to play</div>
         <input id="name-input" type="text" maxlength="14" placeholder="Your name..." autocomplete="off" spellcheck="false">
         <button id="name-btn">PLAY ▶</button>
+      </div>
+    </div>
+
+    <div id="tutorial-overlay">
+      <div id="tutorial-box">
+        <h1>HOW TO PLAY</h1>
+
+        <div class="tut-section">
+          <h2>🎯 Objective</h2>
+          <p>Balloons fall in 4 colors. Shoot the <strong style="color:#fff">first balloon</strong> to set your <strong style="color:#ffdd44">target color</strong>. Keep shooting that color — hit 3 in a row for a <strong style="color:#ff8833">bonus!</strong> Wrong color or miss = lose a life.</p>
+        </div>
+
+        <div class="tut-section">
+          <h2>🕹️ Controls</h2>
+          <div class="tut-ctrl-row"><span class="ctrl-badge">D-pad</span> Move your ship</div>
+          <div class="tut-ctrl-row"><span class="ctrl-badge">FIRE</span> Shoot laser</div>
+          <div class="tut-ctrl-row"><span class="ctrl-badge">SHIELD</span> Block balloons (hold)</div>
+          <div class="tut-ctrl-row"><span class="ctrl-badge">Tap screen</span> Restart after game over</div>
+        </div>
+
+        <div class="tut-section">
+          <h2>⭐ Bonus Targets</h2>
+          <div class="tut-bonus">
+            <div class="tut-bonus-item"><span class="bonus-icon">🚀</span><span>Bonus spaceship flies across — shoot for <strong style="color:#ff8833">+3 pts</strong></span></div>
+            <div class="tut-bonus-item"><span class="bonus-icon">★</span><span>Golden star bounces around — shoot or touch for <strong style="color:#ffe033">+5 pts</strong></span></div>
+          </div>
+        </div>
+
+        <div class="tut-section">
+          <h2>📈 Difficulty</h2>
+          <ul>
+            <li>More balloons every 6 points (capped at 25)</li>
+            <li>Speed increases every level</li>
+            <li>You have <strong style="color:#ff4444">3 lives ❤</strong></li>
+          </ul>
+        </div>
+
+        <button id="tutorial-start">LET'S GO! 🚀</button>
       </div>
     </div>
   </div>
@@ -1002,18 +1114,25 @@
     initGame();
     loop();
 
-    const overlay = document.getElementById('name-overlay');
-    const input   = document.getElementById('name-input');
-    const btn     = document.getElementById('name-btn');
+    const overlay     = document.getElementById('name-overlay');
+    const input       = document.getElementById('name-input');
+    const btn         = document.getElementById('name-btn');
+    const tutOverlay  = document.getElementById('tutorial-overlay');
+    const tutStartBtn = document.getElementById('tutorial-start');
 
-    function startWithName() {
+    function showTutorial() {
       playerName = input.value.trim() || 'Player';
       overlay.style.display = 'none';
+      tutOverlay.style.display = 'flex';
+    }
+    function startGame() {
+      tutOverlay.style.display = 'none';
       waitingForName = false;
       initGame();
     }
-    btn.addEventListener('click', startWithName);
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') startWithName(); });
+    btn.addEventListener('click', showTutorial);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') showTutorial(); });
+    tutStartBtn.addEventListener('click', startGame);
     setTimeout(() => input.focus(), 50);
   });
 
