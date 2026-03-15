@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Balloon Blaster</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      background: #0a0a1a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+    }
+    #game-wrap {
+      display: flex;
+      flex-direction: column;
+      width: min(800px, 100vw);
+    }
+    #gameCanvas {
+      width: 100%;
+      height: auto;
+      display: block;
+      border: 2px solid #334;
+      border-radius: 8px 8px 0 0;
+      box-shadow: 0 0 40px rgba(0,120,255,0.25);
+      touch-action: none;
+    }
+    #instructions {
+      color: #778;
+      font-size: 13px;
+      padding: 6px 0 2px;
+      text-align: center;
+    }
+
+    /* ── Touch controls (shown via JS on touch devices) ── */
+    #touch-controls {
+      display: none;
+      width: 100%;
+      background: rgba(0,5,20,0.88);
+      padding: 10px 16px 14px;
+      border: 2px solid #334;
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #dpad {
+      display: grid;
+      grid-template-areas: ". up ." "left gap right" ". down .";
+      grid-template-columns: repeat(3, 56px);
+      grid-template-rows: repeat(3, 56px);
+      gap: 3px;
+    }
+    .dpad-btn {
+      width: 56px; height: 56px;
+      border-radius: 10px;
+      background: rgba(80,160,255,0.22);
+      border: 1.5px solid rgba(120,200,255,0.45);
+      color: #88ccff;
+      font-size: 22px;
+      display: flex; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+      cursor: pointer;
+      transition: background 0.08s;
+    }
+    .dpad-btn:active { background: rgba(80,160,255,0.55); }
+    #action-btns {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+    }
+    .action-btn {
+      border-radius: 50%;
+      font-size: 13px; font-weight: bold; letter-spacing: 0.5px;
+      display: flex; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+      cursor: pointer;
+      transition: background 0.08s;
+    }
+    #btn-shoot {
+      width: 88px; height: 88px;
+      font-size: 15px;
+      background: rgba(255,70,70,0.28);
+      border: 2px solid rgba(255,110,110,0.65);
+      color: #ffaaaa;
+      box-shadow: 0 0 14px rgba(255,80,80,0.3);
+    }
+    #btn-shoot:active { background: rgba(255,70,70,0.6); }
+    #btn-shield {
+      width: 68px; height: 68px;
+      background: rgba(0,190,255,0.22);
+      border: 2px solid rgba(0,220,255,0.5);
+      color: #88eeff;
+      box-shadow: 0 0 10px rgba(0,200,255,0.2);
+    }
+    #btn-shield:active { background: rgba(0,190,255,0.55); }
+  </style>
+</head>
+<body>
+  <div id="game-wrap">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="touch-controls">
+      <div id="dpad">
+        <button class="dpad-btn" id="btn-up"    style="grid-area:up">▲</button>
+        <button class="dpad-btn" id="btn-left"  style="grid-area:left">◀</button>
+        <button class="dpad-btn" id="btn-right" style="grid-area:right">▶</button>
+        <button class="dpad-btn" id="btn-down"  style="grid-area:down">▼</button>
+      </div>
+      <div id="action-btns">
+        <button class="action-btn" id="btn-shoot">FIRE</button>
+        <button class="action-btn" id="btn-shield">SHIELD</button>
+      </div>
+    </div>
+    <div id="instructions">Arrow Keys: Move &nbsp;|&nbsp; Space: Shoot &nbsp;|&nbsp; Enter: Shield &nbsp;|&nbsp; R: Restart &nbsp;|&nbsp; Esc: Quit</div>
+  </div>
+
+  <script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx    = canvas.getContext('2d');
+
+  // ── Background Removal (flood fill from corners) ──────────────────────────
+  function removeBackground(img, threshold = 35) {
+    const oc   = document.createElement('canvas');
+    oc.width   = img.naturalWidth  || img.width;
+    oc.height  = img.naturalHeight || img.height;
+    const oc2  = oc.getContext('2d');
+    oc2.drawImage(img, 0, 0);
+
+    const W = oc.width, H = oc.height;
+    const id = oc2.getImageData(0, 0, W, H);
+    const d  = id.data;
+
+    const isBg = i => {
+      const r = d[i], g = d[i+1], b = d[i+2];
+      return r > 255-threshold && g > 255-threshold && b > 255-threshold;
+    };
+
+    const visited = new Uint8Array(W * H);
+    const stack   = [];
+
+    const push = (x, y) => {
+      if (x < 0 || x >= W || y < 0 || y >= H) return;
+      const i = y * W + x;
+      if (visited[i]) return;
+      visited[i] = 1;
+      if (isBg(i * 4)) stack.push(x, y);
+    };
+
+    // seed all four corners + top/bottom edges every 4px
+    for (let x = 0; x < W; x += 4) { push(x, 0); push(x, H-1); }
+    for (let y = 0; y < H; y += 4) { push(0, y); push(W-1, y); }
+
+    while (stack.length) {
+      const y = stack.pop(), x = stack.pop();
+      d[(y * W + x) * 4 + 3] = 0;
+      push(x+1, y); push(x-1, y); push(x, y+1); push(x, y-1);
+    }
+
+    oc2.putImageData(id, 0, 0);
+    return oc;
+  }
+
+  // ── Load Images ───────────────────────────────────────────────────────────
+  const IMG       = {};   // key → canvas
+  const IMG_BLEND = {};   // key → true if needs 'multiply' composite
+  const FILES = {
+    green:    'Green Baloon.jpg',
+    yellow:   'Yellow Baloon.jpg',
+    purple:   'Purple Baloon.jpg',
+    colorful: 'Color Baloon.jpg',
+    ship:     'Spaceship.jpg',
+    iranship: 'iranian spaceship.png',
+  };
+  const BALLOON_TYPES = ['green','yellow','purple','colorful'];
+
+  // Draw a sprite, using multiply blend if getImageData was blocked
+  function drawSprite(key, x, y, w, h) {
+    if (!IMG[key]) return;
+    if (IMG_BLEND[key]) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.drawImage(IMG[key], x, y, w, h);
+      ctx.restore();
+    } else {
+      ctx.drawImage(IMG[key], x, y, w, h);
+    }
+  }
+
+  function rawCanvas(img) {
+    const fb = document.createElement('canvas');
+    fb.width  = img.naturalWidth  || img.width  || 70;
+    fb.height = img.naturalHeight || img.height || 100;
+    fb.getContext('2d').drawImage(img, 0, 0);
+    return fb;
+  }
+
+  function loadImages() {
+    return new Promise(resolve => {
+      let done = 0;
+      const total = Object.keys(FILES).length;
+      for (const [key, src] of Object.entries(FILES)) {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            IMG[key]       = removeBackground(img);
+            IMG_BLEND[key] = false;
+          } catch (e) {
+            // getImageData blocked (file:// security) — use raw image + multiply blend
+            IMG[key]       = rawCanvas(img);
+            IMG_BLEND[key] = true;
+          }
+          if (++done === total) resolve();
+        };
+        img.onerror = () => {
+          // Image not found — draw a coloured shape placeholder
+          const fb = document.createElement('canvas');
+          fb.width = 70; fb.height = 100;
+          const fc = fb.getContext('2d');
+          fc.fillStyle = key === 'ship' ? '#88aaff' : key;
+          fc.beginPath();
+          fc.ellipse(35, 50, 30, 45, 0, 0, Math.PI * 2);
+          fc.fill();
+          IMG[key]       = fb;
+          IMG_BLEND[key] = false;
+          if (++done === total) resolve();
+        };
+        img.src = src;
+      }
+    });
+  }
+
+  // ── Audio (Web Audio synthesis — no external files) ──────────────────────
+  let _ac = null;
+  function ac() {
+    if (!_ac) _ac = new (window.AudioContext || window.webkitAudioContext)();
+    if (_ac.state === 'suspended') _ac.resume();
+    return _ac;
+  }
+  function tone(freq, type, dur, vol = 0.28, startFreq = null) {
+    const ctx = ac(), o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = type;
+    o.frequency.setValueAtTime(startFreq || freq, ctx.currentTime);
+    if (startFreq) o.frequency.exponentialRampToValueAtTime(freq, ctx.currentTime + dur);
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    o.start(); o.stop(ctx.currentTime + dur);
+  }
+  function noise(dur, vol = 0.6, filterFreq = 300) {
+    const ctx = ac(), sr = ctx.sampleRate;
+    const buf = ctx.createBuffer(1, sr * dur, sr), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/d.length, 0.4);
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    f.type = 'lowpass'; f.frequency.value = filterFreq;
+    src.buffer = buf; src.connect(f); f.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    src.start();
+  }
+  function arpeggio(freqs, type, noteDur, vol = 0.22) {
+    freqs.forEach((f, i) => {
+      const ctx = ac(), o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      const t = ctx.currentTime + i * noteDur;
+      o.type = type; o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + noteDur * 1.5);
+      o.start(t); o.stop(t + noteDur * 1.5);
+    });
+  }
+  const SFX = {
+    shoot:    () => tone(880, 'sine',     0.08, 0.18, 1400),
+    pop:      () => { noise(0.12, 0.5, 500); tone(180, 'sine', 0.12, 0.15, 280); },
+    miss:     () => tone(200, 'sawtooth', 0.32, 0.22, 330),
+    score:    () => arpeggio([523, 659, 784],       'sine',     0.09),
+    wild:     () => arpeggio([440, 554, 659, 880],  'sine',     0.07, 0.18),
+    levelUp:  () => arpeggio([262, 330, 392, 523, 784], 'triangle', 0.11, 0.28),
+    bonus:    () => { noise(0.35, 0.9, 250); tone(60, 'sawtooth', 0.4, 0.35, 90); },
+    gameOver: () => arpeggio([330, 262, 196, 147], 'sine', 0.28, 0.35),
+  };
+
+  // ── Game State ────────────────────────────────────────────────────────────
+  const TOTAL_LIVES = 3;
+  let score, lives, streak, targetColor, gameOver, level, gameStartTime, gameDuration;
+  let balloonTimer, shootCooldown, bonusShipTimer, bonusShip;
+  const BONUS_INTERVAL = 300;   // ~5 s at 60 fps
+  const BSW = 120, BSH = 65;    // bonus ship render size
+
+  const ship = { x:0, y:0, w:90, h:70, speed:5 };
+
+  const bullets   = [];
+  const balloons  = [];
+  const particles = [];
+  const popups    = [];     // score / miss floating text
+
+  function initGame() {
+    score        = 0;
+    lives        = TOTAL_LIVES;
+    streak       = 0;
+    targetColor  = null;   // first hit after init/score picks the color
+    gameOver      = false;
+    level         = 1;
+    gameStartTime = Date.now();
+    balloonTimer   = 0;
+    shootCooldown  = 0;
+    bonusShipTimer = 0;
+    bonusShip      = null;
+    missFlash = 0; scoreFlash = 0; levelFlash = 0;
+    ship.x = canvas.width  / 2 - ship.w / 2;
+    ship.y = canvas.height - ship.h - 20;
+    bullets.length   = 0;
+    balloons.length  = 0;
+    particles.length = 0;
+    popups.length    = 0;
+  }
+
+  function randomColor() {
+    return BALLOON_TYPES[Math.floor(Math.random() * BALLOON_TYPES.length)];
+  }
+
+  // ── Input ─────────────────────────────────────────────────────────────────
+  const keys = new Set();
+  window.addEventListener('keydown', e => {
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Enter'].includes(e.key))
+      e.preventDefault();
+    keys.add(e.key);
+    if ((e.key === 'r' || e.key === 'R') && gameOver) initGame();
+    if (e.key === 'Escape') {
+      if (!gameOver) { gameOver = true; }   // end current game
+      else           { window.close(); }    // close window from game-over screen
+    }
+  });
+  window.addEventListener('keyup', e => keys.delete(e.key));
+
+  // ── Particles ─────────────────────────────────────────────────────────────
+  const COLOR_MAP = {
+    green:'#55ff55', yellow:'#ffee44', purple:'#cc55ff', colorful:'#ff8833'
+  };
+
+  function burst(x, y, color) {
+    const c = COLOR_MAP[color] || '#ffffff';
+    for (let i = 0; i < 14; i++) {
+      const a = (Math.PI * 2 * i) / 14;
+      const s = 2.5 + Math.random() * 3.5;
+      particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s,
+                        life:1, color:c, size: 4+Math.random()*4 });
+    }
+  }
+
+  // ── Floating Text Popup ───────────────────────────────────────────────────
+  function addPopup(x, y, text, color) {
+    popups.push({ x, y, vy:-1.8, life:1.6, text, color });
+  }
+
+  // ── Update ────────────────────────────────────────────────────────────────
+  const BW = 65, BH = 90;   // balloon render size
+  const SPAWN_FRAMES = 85;
+  const BULLET_SPD   = 13;
+
+  function update() {
+    if (gameOver) return;
+
+    // Ship movement
+    if (keys.has('ArrowLeft'))  ship.x = Math.max(0, ship.x - ship.speed);
+    if (keys.has('ArrowRight')) ship.x = Math.min(canvas.width - ship.w, ship.x + ship.speed);
+    if (keys.has('ArrowUp'))    ship.y = Math.max(0, ship.y - ship.speed);
+    if (keys.has('ArrowDown'))  ship.y = Math.min(canvas.height - ship.h, ship.y + ship.speed);
+
+    // Shoot
+    if (shootCooldown > 0) shootCooldown--;
+    if (keys.has(' ') && shootCooldown === 0) {
+      bullets.push({ x: ship.x + ship.w/2 - 4, y: ship.y - 8, w:8, h:22 });
+      shootCooldown = 10;
+      SFX.shoot();
+    }
+
+    // Move bullets
+    for (let i = bullets.length-1; i >= 0; i--) {
+      bullets[i].y -= BULLET_SPD;
+      if (bullets[i].y < -30) bullets.splice(i, 1);
+    }
+
+    // Spawn balloons — target count grows by 2 every 6 points
+    if (++balloonTimer >= SPAWN_FRAMES) {
+      balloonTimer = 0;
+      const target   = 1 + Math.floor(score / 6) * 2;
+      const toSpawn  = Math.max(1, target - balloons.length);
+      for (let s = 0; s < toSpawn; s++) {
+        balloons.push({
+          x: 20 + Math.random() * (canvas.width - BW - 40),
+          y: -BH - 10,
+          w: BW, h: BH,
+          color: randomColor(),
+          speed: (1.0 + Math.random() * 1.8) * (1 + (level - 1) * 0.12),
+          vx: (Math.random() * 3 + 1) * (Math.random() < 0.5 ? 1 : -1)
+        });
+      }
+    }
+
+    // Move balloons
+    for (let i = balloons.length-1; i >= 0; i--) {
+      const b = balloons[i];
+      b.y += b.speed;
+      b.x += b.vx;
+      b.vx *= 0.995;                                         // very slow dampen — keeps sideways drift
+      if (b.x < 10)                        { b.x = 10;                       b.vx =  Math.abs(b.vx) + 0.2; }
+      if (b.x + b.w > canvas.width - 10)  { b.x = canvas.width - 10 - b.w;  b.vx = -Math.abs(b.vx) - 0.2; }
+      if (b.y > canvas.height + 20) { balloons.splice(i, 1); }
+    }
+
+    // Balloon ↔ Balloon — push apart horizontally so they never overlap
+    for (let i = 0; i < balloons.length; i++) {
+      for (let j = i + 1; j < balloons.length; j++) {
+        const a = balloons[i], b = balloons[j];
+        const cx = (a.x + a.w / 2) - (b.x + b.w / 2);
+        const cy = (a.y + a.h / 2) - (b.y + b.h / 2);
+        const overlapX = (a.w + b.w) / 2 - Math.abs(cx);
+        const overlapY = (a.h + b.h) / 2 - Math.abs(cy);
+        if (overlapX > 0 && overlapY > 0) {
+          const push = overlapX / 2 + 0.5;
+          if (cx >= 0) { a.x += push; b.x -= push; a.vx += 0.6; b.vx -= 0.6; }
+          else         { a.x -= push; b.x += push; a.vx -= 0.6; b.vx += 0.6; }
+        }
+      }
+    }
+
+    // Bonus ship — flies right-to-left every 5 s
+    if (++bonusShipTimer >= BONUS_INTERVAL) {
+      bonusShipTimer = 0;
+      if (!bonusShip) bonusShip = { x: canvas.width + 10, y: 0, w: BSW, h: BSH, speed: 3.5 };
+    }
+    if (bonusShip) {
+      bonusShip.x -= bonusShip.speed;
+      if (bonusShip.x + bonusShip.w < 0) bonusShip = null;
+    }
+
+    // Bullet ↔ Bonus ship
+    if (bonusShip) {
+      for (let bi = bullets.length - 1; bi >= 0; bi--) {
+        if (overlaps(bullets[bi], bonusShip)) {
+          score += 3;
+          checkLevelUp();
+          burstBig(bonusShip.x + bonusShip.w / 2, bonusShip.y + bonusShip.h / 2);
+          addPopup(bonusShip.x + bonusShip.w / 2, bonusShip.y - 10, '+3 BONUS!', '#ff6600');
+          scoreFlash = 8;
+          SFX.bonus();
+          bonusShip = null;
+          bullets.splice(bi, 1);
+          break;
+        }
+      }
+    }
+
+    // Bullet ↔ Balloon
+    outer:
+    for (let bi = bullets.length-1; bi >= 0; bi--) {
+      for (let ai = balloons.length-1; ai >= 0; ai--) {
+        if (overlaps(bullets[bi], balloons[ai])) {
+          const b = balloons[ai];
+          burst(b.x + b.w/2, b.y + b.h/2, b.color);
+          handleHit(b.color, b.x + b.w/2, b.y + b.h/2);
+          balloons.splice(ai, 1);
+          bullets.splice(bi, 1);
+          continue outer;
+        }
+      }
+    }
+
+    // Ship ↔ Balloon (slightly inset hitbox) — skipped while shield (Enter) is held
+    if (!keys.has('Enter')) {
+      const sh = { x: ship.x+12, y: ship.y+12, w: ship.w-24, h: ship.h-24 };
+      for (let ai = balloons.length-1; ai >= 0; ai--) {
+        if (overlaps(sh, balloons[ai])) {
+          const b = balloons[ai];
+          burst(b.x + b.w/2, b.y + b.h/2, b.color);
+          handleHit(b.color, b.x + b.w/2, b.y + b.h/2);
+          balloons.splice(ai, 1);
+        }
+      }
+    }
+
+    // Particles
+    for (let i = particles.length-1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.08;
+      p.life -= 0.03;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // Popups
+    for (let i = popups.length-1; i >= 0; i--) {
+      popups[i].y += popups[i].vy;
+      popups[i].life -= 0.025;
+      if (popups[i].life <= 0) popups.splice(i, 1);
+    }
+
+    if (lives <= 0 && !gameOver) {
+      gameOver     = true;
+      gameDuration = Math.floor((Date.now() - gameStartTime) / 1000);
+      saveScore(score, gameDuration);
+      SFX.gameOver();
+    }
+  }
+
+  function handleHit(color, px, py) {
+    // Wildcard: colorful counts as the current target, never triggers a miss
+    if (color === 'colorful') {
+      addPopup(px, py - 20, 'WILD! 🌈', '#ff8833');
+      burstRainbow(px, py);
+      SFX.wild();
+      if (targetColor !== null) {
+        streak++;
+        if (streak >= 3) {
+          score++;
+          checkLevelUp();
+          addPopup(px, py - 20, '+1 POINT!', '#ffff44');
+          scoreFlash = 8;
+          targetColor = null;
+          streak = 0;
+        }
+      }
+      return;
+    }
+
+    if (targetColor === null) {
+      targetColor = color;
+      streak = 1;
+      SFX.pop();
+    } else if (color === targetColor) {
+      streak++;
+      SFX.pop();
+      if (streak >= 3) {
+        score++;
+        checkLevelUp();
+        addPopup(px, py - 20, '+1 POINT!', '#ffff44');
+        scoreFlash = 8;
+        targetColor = null;
+        streak = 0;
+        SFX.score();
+      }
+    } else {
+      lives = Math.max(0, lives - 1);
+      targetColor = color;
+      streak = 1;
+      addPopup(px, py - 20, 'MISS! -1 ❤', '#ff4444');
+      missFlash = 10;
+      SFX.miss();
+    }
+  }
+
+  function checkLevelUp() {
+    const newLevel = Math.floor(score / 6) + 1;
+    if (newLevel > level) {
+      level = newLevel;
+      addPopup(canvas.width / 2, canvas.height / 2, `LEVEL ${level}!`, '#00eeff');
+      levelFlash = 14;
+      SFX.levelUp();
+    }
+  }
+
+  function overlaps(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x &&
+           a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  // ── Stars ────────────────────────────────────────────────────────────────
+  const stars = [];
+  for (let i = 0; i < 60; i++) {
+    stars.push({
+      x: Math.random() * 800, y: Math.random() * 300,
+      r: 0.5 + Math.random() * 1.5,
+      a: 0.3 + Math.random() * 0.7
+    });
+  }
+
+  let missFlash = 0, scoreFlash = 0, levelFlash = 0;
+
+  function burstBig(x, y) {
+    for (let i = 0; i < 28; i++) {
+      const a = (Math.PI * 2 * i) / 28, s = 3 + Math.random() * 6;
+      const cols = ['#ff6600','#ffcc00','#ff3300','#ffff00','#ff9900'];
+      particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s,
+                        life: 1.2, color: cols[i % cols.length], size: 6 + Math.random() * 6 });
+    }
+  }
+  function burstRainbow(x, y) {
+    const cols = ['#ff4444','#ff8800','#ffee00','#44ff44','#44aaff','#cc44ff','#ff44cc'];
+    for (let i = 0; i < 21; i++) {
+      const a = (Math.PI * 2 * i) / 21, s = 2.5 + Math.random() * 4;
+      particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s,
+                        life: 1.1, color: cols[i % cols.length], size: 5 + Math.random() * 4 });
+    }
+  }
+
+  // ── Draw ──────────────────────────────────────────────────────────────────
+  function draw() {
+    // Sky (bright daytime — needed for 'multiply' white-removal trick)
+    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    sky.addColorStop(0,   '#5ba3d9');
+    sky.addColorStop(0.5, '#a8d8f0');
+    sky.addColorStop(1,   '#dff0fb');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Clouds (replace stars — bright sky now)
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    for (const s of stars) {
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y * 2.5, s.r * 10, s.r * 4, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // Screen flash overlays
+    if (missFlash  > 0) { ctx.fillStyle = `rgba(255,0,0,${missFlash  * 0.03})`; ctx.fillRect(0,0,canvas.width,canvas.height); missFlash--;  }
+    if (scoreFlash > 0) { ctx.fillStyle = `rgba(0,255,80,${scoreFlash * 0.04})`; ctx.fillRect(0,0,canvas.width,canvas.height); scoreFlash--; }
+    if (levelFlash > 0) { ctx.fillStyle = `rgba(0,220,255,${levelFlash * 0.05})`; ctx.fillRect(0,0,canvas.width,canvas.height); levelFlash--; }
+
+    // Particles (behind balloons)
+    for (const p of particles) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
+      const alpha = Math.floor(p.life * 255).toString(16).padStart(2,'0');
+      ctx.fillStyle = p.color + alpha;
+      ctx.fill();
+    }
+
+    // Balloons
+    for (const b of balloons) {
+      drawSprite(b.color, b.x, b.y, b.w, b.h);
+    }
+
+    // Bonus ship
+    if (bonusShip) drawSprite('iranship', bonusShip.x, bonusShip.y, bonusShip.w, bonusShip.h);
+
+    // Bullets (laser)
+    for (const b of bullets) {
+      const lg = ctx.createLinearGradient(b.x, b.y + b.h, b.x, b.y);
+      lg.addColorStop(0, '#0044ff');
+      lg.addColorStop(0.5, '#88ccff');
+      lg.addColorStop(1, '#ffffff');
+      ctx.shadowColor = '#88ccff';
+      ctx.shadowBlur  = 10;
+      ctx.fillStyle   = lg;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    ctx.shadowBlur = 0;
+
+    // Shield bubble (drawn behind ship so ship renders on top)
+    if (keys.has('Enter') && !gameOver) {
+      const pulse = 0.55 + 0.25 * Math.sin(Date.now() / 120);
+      ctx.save();
+      ctx.shadowColor = '#00eeff';
+      ctx.shadowBlur  = 28;
+      ctx.strokeStyle = `rgba(0,220,255,${pulse})`;
+      ctx.lineWidth   = 4;
+      ctx.beginPath();
+      ctx.ellipse(ship.x + ship.w/2, ship.y + ship.h/2,
+                  ship.w/2 + 14, ship.h/2 + 14, 0, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(0,180,255,${pulse * 0.18})`;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Ship
+    drawSprite('ship', ship.x, ship.y, ship.w, ship.h);
+
+    // Floating text popups
+    for (const p of popups) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(p.life, 1);
+      ctx.font = 'bold 22px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = p.color;
+      ctx.strokeStyle = 'black';
+      ctx.lineWidth = 3;
+      ctx.strokeText(p.text, p.x, p.y);
+      ctx.fillText(p.text, p.x, p.y);
+      ctx.restore();
+    }
+
+    drawHUD();
+    if (gameOver) drawGameOver();
+  }
+
+  function drawHUD() {
+    // Score (top-left)
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 24px Arial';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
+    ctx.strokeText(`Score: ${score}`, 16, 34);
+    ctx.fillStyle = '#003366';
+    ctx.fillText(`Score: ${score}`, 16, 34);
+
+    // Level (top-left below score)
+    ctx.font = 'bold 18px Arial';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
+    ctx.strokeText(`Level: ${level}`, 16, 56);
+    ctx.fillStyle = '#00eeff';
+    ctx.fillText(`Level: ${level}`, 16, 56);
+
+    // Lives (top-left below level)
+    ctx.font = 'bold 20px Arial';
+    const heartFull  = '❤';
+    const heartEmpty = '♡';
+    let heartsStr = '';
+    for (let i = 0; i < TOTAL_LIVES; i++) heartsStr += (i < lives ? heartFull : heartEmpty) + ' ';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
+    ctx.strokeText(heartsStr, 16, 80);
+    ctx.fillStyle = lives <= 1 ? '#cc0000' : '#003366';
+    ctx.fillText(heartsStr, 16, 80);
+
+    // Streak dots (left column, below lives) — filled with the streak's color
+    const DOT_FILL   = { green:'#44dd44', yellow:'#ffee00', purple:'#cc44ff', colorful:'#ff8800' };
+    const DOT_STROKE = { green:'#aaffaa', yellow:'#ffe080', purple:'#ee88ff', colorful:'#ffcc88' };
+    for (let i = 0; i < 3; i++) {
+      const dx = 16 + i * 28;
+      const dy = 102;
+      ctx.beginPath();
+      ctx.arc(dx, dy, 9, 0, Math.PI*2);
+      ctx.fillStyle   = (i < streak && targetColor) ? DOT_FILL[targetColor]   : 'rgba(255,255,255,0.2)';
+      ctx.fill();
+      ctx.strokeStyle = (i < streak && targetColor) ? DOT_STROKE[targetColor] : 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  // ── High-score persistence ────────────────────────────────────────────────
+  function loadScores() {
+    try { return JSON.parse(localStorage.getItem('bb_scores') || '[]'); }
+    catch { return []; }
+  }
+  function saveScore(s, secs) {
+    const scores = loadScores();
+    const now = new Date();
+    const date = now.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+    scores.push({ score: s, secs, date });
+    scores.sort((a, b) => b.score - a.score);
+    localStorage.setItem('bb_scores', JSON.stringify(scores.slice(0, 3)));
+  }
+  function fmtTime(secs) {
+    return Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+  }
+
+  function rrect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.lineTo(x+w-r, y);     ctx.arcTo(x+w, y,   x+w, y+r,   r);
+    ctx.lineTo(x+w, y+h-r);   ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+    ctx.lineTo(x+r, y+h);     ctx.arcTo(x,   y+h, x, y+h-r,   r);
+    ctx.lineTo(x, y+r);       ctx.arcTo(x,   y,   x+r, y,      r);
+    ctx.closePath();
+  }
+
+  function drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+
+    // Title
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 60px Arial';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText('GAME OVER', cx, 80);
+    ctx.fillStyle = '#ff4444';
+    ctx.fillText('GAME OVER', cx, 80);
+
+    // Current score + time (frozen at game-over)
+    ctx.font = 'bold 28px Arial';
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeText(`Score: ${score}   ${fmtTime(gameDuration)}`, cx, 130);
+    ctx.fillText(`Score: ${score}   ${fmtTime(gameDuration)}`, cx, 130);
+
+    // Leaderboard panel
+    const scores = loadScores();
+    const panW = 440, panH = 26 + scores.length * 28 + 16;
+    const panX = cx - panW / 2, panY = 152;
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    rrect(panX, panY, panW, panH, 10);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.font = 'bold 14px Arial';
+    ctx.fillStyle = '#ffdd44';
+    ctx.fillText('ALL-TIME TOP SCORES', cx, panY + 18);
+
+    scores.forEach((entry, i) => {
+      const y = panY + 40 + i * 28;
+      const isThis = entry.score === score && i === scores.findIndex(e => e.score === score);
+      const col = isThis ? '#ffff88' : (i === 0 ? '#ffd700' : '#cccccc');
+      ctx.font = isThis ? 'bold 15px Arial' : '14px Arial';
+      ctx.fillStyle = col;
+      ctx.textAlign = 'left';  ctx.fillText(`${i + 1}.`,                  panX + 14, y);
+      ctx.textAlign = 'left';  ctx.fillText(entry.score,                   panX + 48, y);
+      ctx.textAlign = 'center';ctx.fillText(fmtTime(entry.secs ?? 0),      cx,        y);
+      ctx.textAlign = 'right'; ctx.fillStyle = isThis ? '#ffff88' : '#777';
+      ctx.font = '12px Arial'; ctx.fillText(entry.date,                    panX + panW - 12, y);
+    });
+
+    // Footer
+    ctx.textAlign = 'center';
+    ctx.font = '18px Arial';
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillText('R / tap — play again    ·    Esc — quit', cx, panY + panH + 30);
+  }
+
+  // ── Game Loop ─────────────────────────────────────────────────────────────
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ── Touch / Mobile ────────────────────────────────────────────────────────
+  (function () {
+    const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    if (isTouch) {
+      document.getElementById('touch-controls').style.display = 'flex';
+      document.getElementById('instructions').style.display   = 'none';
+    }
+
+    function bindTouch(id, key) {
+      const el = document.getElementById(id);
+      const dn = e => { e.preventDefault(); try { ac(); } catch (_) {} keys.add(key); };
+      const up = e => { e.preventDefault(); keys.delete(key); };
+      el.addEventListener('touchstart',  dn, { passive: false });
+      el.addEventListener('touchend',    up, { passive: false });
+      el.addEventListener('touchcancel', up, { passive: false });
+      // Also respond to mouse so desktop can test by clicking buttons
+      el.addEventListener('mousedown',  () => keys.add(key));
+      el.addEventListener('mouseup',    () => keys.delete(key));
+      el.addEventListener('mouseleave', () => keys.delete(key));
+    }
+
+    bindTouch('btn-up',     'ArrowUp');
+    bindTouch('btn-left',   'ArrowLeft');
+    bindTouch('btn-right',  'ArrowRight');
+    bindTouch('btn-down',   'ArrowDown');
+    bindTouch('btn-shoot',  ' ');
+    bindTouch('btn-shield', 'Enter');
+
+    // Tap / click canvas to restart on game-over screen
+    canvas.addEventListener('touchend', e => {
+      e.preventDefault();
+      if (gameOver) initGame();
+    }, { passive: false });
+    canvas.addEventListener('click', () => { if (gameOver) initGame(); });
+  })();
+
+  // ── Start ─────────────────────────────────────────────────────────────────
+  loadImages().then(() => {
+    initGame();
+    loop();
+  });
+
+  </script>
+</body>
+</html>

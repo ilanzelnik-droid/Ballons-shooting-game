@@ -1,0 +1,6 @@
+Done. Each balloon now has a horizontal velocity (vx). When two balloons overlap:
+
+They're pushed apart immediately (position correction)
+Each gets a small opposing vx kick (the bounce)
+vx damps by 12% each frame so they settle quickly
+Wall hits reflect the vx so balloons never escape the canvas
